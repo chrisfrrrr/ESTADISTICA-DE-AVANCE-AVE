@@ -1,0 +1,12 @@
+Automatización diaria sugerida en Windows
+
+1. Abra el Programador de tareas de Windows.
+2. Cree una tarea básica.
+3. Frecuencia: diaria.
+4. Hora sugerida: 07:00 a. m.
+5. Acción: iniciar un programa.
+6. Programa/script: powershell.exe
+7. Argumentos:
+   -ExecutionPolicy Bypass -Command "cd 'RUTA_DE_LA_CARPETA'; streamlit run app.py"
+
+Recomendación: para automatización completamente silenciosa se puede crear un script CLI adicional con token en .env. Por seguridad, esta versión prioriza ejecución controlada por el asesor desde la app.
