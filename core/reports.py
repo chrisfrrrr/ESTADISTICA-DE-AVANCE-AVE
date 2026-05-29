@@ -56,6 +56,21 @@ def _safe_cell(value):
     if isinstance(value, str): return value.replace('T', ' ').replace('Z', '')
     return value
 
+
+
+def _num_series(df: pd.DataFrame | None, col: str, default: float = 0.0) -> pd.Series:
+    """Devuelve una serie numérica segura aunque la columna venga como texto, vacía o no exista."""
+    if df is None or col not in df.columns:
+        return pd.Series([default])
+    return pd.to_numeric(df[col], errors='coerce').fillna(default)
+
+def _num_sum(df: pd.DataFrame | None, col: str, default: float = 0.0) -> float:
+    return float(_num_series(df, col, default).sum())
+
+def _num_mean(df: pd.DataFrame | None, col: str, default: float = 0.0) -> float:
+    ser = _num_series(df, col, default)
+    return float(ser.mean()) if len(ser) else default
+
 def _write_df(ws, df: pd.DataFrame | None):
     if df is None or df.empty:
         ws.append(['Sin datos disponibles'])
@@ -115,12 +130,12 @@ def excel_bytes(summary: pd.DataFrame, submissions: pd.DataFrame, history: pd.Da
             ['Riesgo alto', counts.get('Alto',0)],
             ['Riesgo medio', counts.get('Medio',0)],
             ['Riesgo bajo', counts.get('Bajo',0)],
-            ['Avance promedio', round(float(summary.get('porcentaje_avance', pd.Series([0])).mean()),2)],
-            ['Horas promedio', round(float(summary.get('tiempo_total_horas', pd.Series([0])).mean()),2)],
-            ['Pendientes actuales', int(summary.get('pendientes_actuales', summary.get('pendientes', pd.Series([0]))).sum())],
-            ['Pendientes futuros', int(summary.get('pendientes_futuros', pd.Series([0])).sum())],
-            ['Pendientes totales', int(summary.get('pendientes_total', pd.Series([0])).sum())],
-            ['Atrasadas totales', int(summary.get('atrasadas', pd.Series([0])).sum())],
+            ['Avance promedio', round(_num_mean(summary, 'porcentaje_avance'), 2)],
+            ['Horas promedio', round(_num_mean(summary, 'tiempo_total_horas'), 2)],
+            ['Pendientes actuales', int(_num_sum(summary, 'pendientes_actuales') if 'pendientes_actuales' in summary.columns else _num_sum(summary, 'pendientes'))],
+            ['Pendientes futuros', int(_num_sum(summary, 'pendientes_futuros'))],
+            ['Pendientes totales', int(_num_sum(summary, 'pendientes_total'))],
+            ['Atrasadas totales', int(_num_sum(summary, 'atrasadas'))],
         ]
         for r in kpis: ws_kpi.append(r)
     for wsx in wb.worksheets:
@@ -170,7 +185,7 @@ def pdf_bytes(summary: pd.DataFrame, course_name: str, section_name: str, genera
     _header(story, styles, 'Informe Ejecutivo de Seguimiento Académico AVE', course_name, section_name, generated_by, analysis_date, logo_ave, logo_uvg)
     total = len(summary) if summary is not None else 0
     counts = summary['riesgo_integral'].value_counts().to_dict() if total and 'riesgo_integral' in summary.columns else {}
-    kpi = [['Total estudiantes','Riesgo bajo','Riesgo medio','Riesgo alto','Prom. avance','Pendientes actuales','Pendientes futuros','Atrasadas'],[total, counts.get('Bajo',0), counts.get('Medio',0), counts.get('Alto',0), f"{summary['porcentaje_avance'].mean():.1f}%" if total and 'porcentaje_avance' in summary else '0%', int(summary.get('pendientes_actuales', summary.get('pendientes', pd.Series([0]))).sum()) if total else 0, int(summary.get('pendientes_futuros', pd.Series([0])).sum()) if total else 0, int(summary.get('atrasadas', pd.Series([0])).sum()) if total else 0]]
+    kpi = [['Total estudiantes','Riesgo bajo','Riesgo medio','Riesgo alto','Prom. avance','Pendientes actuales','Pendientes futuros','Atrasadas'],[total, counts.get('Bajo',0), counts.get('Medio',0), counts.get('Alto',0), f"{_num_mean(summary, 'porcentaje_avance'):.1f}%" if total else '0%', int(_num_sum(summary, 'pendientes_actuales') if 'pendientes_actuales' in summary.columns else _num_sum(summary, 'pendientes')) if total else 0, int(_num_sum(summary, 'pendientes_futuros')) if total else 0, int(_num_sum(summary, 'atrasadas')) if total else 0]]
     kt = Table(kpi, colWidths=[1.15*inch]*8)
     kt.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#172B85')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('GRID',(0,0),(-1,-1),0.25,colors.grey),('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTSIZE',(0,0),(-1,-1),8)]))
     story += [kt, Spacer(1, 10)]
@@ -309,14 +324,14 @@ def pdf_bytes(summary: pd.DataFrame, course_name: str, section_name: str, genera
     counts = summary['riesgo_integral'].value_counts().to_dict() if total and 'riesgo_integral' in summary.columns else {}
     finalizados = int(summary.get('estado_finalizacion', pd.Series(dtype=str)).eq('Finalizado o al día por entregas').sum()) if total and 'estado_finalizacion' in summary.columns else 0
     no_reg = int(summary.get('clasificacion_registro', pd.Series(dtype=str)).astype(str).str.contains('no registrado|incompletos|Pendiente', case=False, na=False).sum()) if total and 'clasificacion_registro' in summary.columns else 0
-    avance_prom = f"{summary.get('porcentaje_avance', pd.Series([0])).mean():.1f}%" if total and 'porcentaje_avance' in summary else '0%'
+    avance_prom = f"{_num_mean(summary, 'porcentaje_avance'):.1f}%" if total else '0%'
     curso_count = summary['curso_general'].nunique() if total and 'curso_general' in summary.columns else 1
 
     kpi = [[
         'Cursos generales','Estudiantes detectados','Riesgo alto','Riesgo medio','Finalizados/al día','No registrados','Avance prom. actual','Pendientes actuales'
     ],[
         curso_count, total, counts.get('Alto',0), counts.get('Medio',0), finalizados, no_reg, avance_prom,
-        int(summary.get('pendientes_actuales', summary.get('pendientes', pd.Series([0]))).sum()) if total else 0
+        int(_num_sum(summary, 'pendientes_actuales') if 'pendientes_actuales' in summary.columns else _num_sum(summary, 'pendientes')) if total else 0
     ]]
     kt = Table(kpi, colWidths=[1.25*inch]*8)
     kt.setStyle(TableStyle([
@@ -336,16 +351,25 @@ def pdf_bytes(summary: pd.DataFrame, course_name: str, section_name: str, genera
     if total and 'curso_general' in summary.columns:
         story.append(Paragraph('Resumen global por curso', styles['SectionAVE']))
         tmp = summary.copy()
+        # Asegurar que los campos agregados sean numéricos, aunque Canvas o el CSV los devuelvan como texto.
+        for _c in ['pendientes_actuales', 'pendientes', 'porcentaje_avance']:
+            if _c in tmp.columns:
+                tmp[_c] = pd.to_numeric(tmp[_c], errors='coerce').fillna(0)
+        if 'pendientes_actuales' not in tmp.columns:
+            tmp['pendientes_actuales'] = tmp['pendientes'] if 'pendientes' in tmp.columns else 0
+        if 'porcentaje_avance' not in tmp.columns:
+            tmp['porcentaje_avance'] = 0
         g = tmp.groupby('curso_general').agg(
             detectados=('user_id','count'),
             activos=('clasificacion_registro', lambda s: int((s == 'Activo analizado').sum()) if 'clasificacion_registro' in tmp else len(s)),
             finalizados=('estado_finalizacion', lambda s: int((s == 'Finalizado o al día por entregas').sum()) if 'estado_finalizacion' in tmp else 0),
             alto=('riesgo_integral', lambda s: int((s == 'Alto').sum()) if 'riesgo_integral' in tmp else 0),
             medio=('riesgo_integral', lambda s: int((s == 'Medio').sum()) if 'riesgo_integral' in tmp else 0),
-            pendientes=('pendientes_actuales','sum') if 'pendientes_actuales' in tmp else ('user_id','count'),
-            avance=('porcentaje_avance','mean') if 'porcentaje_avance' in tmp else ('user_id','count'),
+            pendientes=('pendientes_actuales','sum'),
+            avance=('porcentaje_avance','mean'),
         ).reset_index().head(12)
-        g['avance'] = g['avance'].fillna(0).round(1).astype(str) + '%'
+        g['pendientes'] = pd.to_numeric(g['pendientes'], errors='coerce').fillna(0).astype(int)
+        g['avance'] = pd.to_numeric(g['avance'], errors='coerce').fillna(0).round(1).astype(str) + '%'
         data = [['Curso','Detectados','Activos','Finalizados','R. alto','R. medio','Pendientes','Avance prom.']] + g.fillna('').astype(str).values.tolist()
         t = Table(data, repeatRows=1, colWidths=[2.05*inch,0.7*inch,0.58*inch,0.72*inch,0.55*inch,0.55*inch,0.7*inch,0.82*inch])
         t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#00A83B')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('GRID',(0,0),(-1,-1),0.22,colors.lightgrey),('FONTSIZE',(0,0),(-1,-1),7),('VALIGN',(0,0),(-1,-1),'TOP'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, colors.HexColor('#F7F9FB')])]))
