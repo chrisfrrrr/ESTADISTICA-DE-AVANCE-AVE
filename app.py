@@ -24,7 +24,7 @@ from core.analytics import (
 from core.reports import excel_bytes, pdf_bytes, individual_pdf_bytes, DEV
 
 load_dotenv()
-st.set_page_config(page_title='AVE Monitor Académico Pro 4.0 FIX4', page_icon='assets/app_icon.ico', layout='wide')
+st.set_page_config(page_title='AVE Monitor Académico Pro 4.0 FIX6 FIX6', page_icon='assets/app_icon.ico', layout='wide')
 
 LOGO_AVE = 'assets/logo_ave.png'
 LOGO_UVG = 'assets/logo_uvg.png'
@@ -308,7 +308,7 @@ with st.sidebar:
     if Path(LOGO_UVG).exists():
         cols[1].image(LOGO_UVG, use_container_width=True)
     st.markdown('### Configuración Canvas')
-    st.caption('AVE Monitor Académico Pro 4.0 FIX4')
+    st.caption('AVE Monitor Académico Pro 4.0 FIX6 FIX6')
     canvas_url = st.text_input('URL Canvas', value=os.getenv('CANVAS_URL', 'https://uvg.instructure.com'))
     token = st.text_input('Token de acceso', value=os.getenv('CANVAS_TOKEN', ''), type='password')
     generated_by = st.text_input('Nombre de quien genera el informe', value='')
@@ -324,6 +324,7 @@ with st.sidebar:
     if st.button('Probar conexión / cargar cursos', use_container_width=True, type='primary'):
         try:
             c = CanvasClient(canvas_url, token)
+            st.caption(f'URL normalizada usada: {c.base_url}')
             me = c.whoami()
             courses = c.courses()
             st.session_state.client = c
@@ -334,7 +335,7 @@ with st.sidebar:
             st.error(f'No se pudo conectar: {e}')
     st.caption(f'Desarrollador: {DEV}')
 
-st.markdown('<p class="ave-title">AVE Monitor Académico Pro 4.0 FIX4</p>', unsafe_allow_html=True)
+st.markdown('<p class="ave-title">AVE Monitor Académico Pro 4.0 FIX6 FIX6</p>', unsafe_allow_html=True)
 st.markdown('<p class="ave-subtitle">Análisis global por Canvas: conexión, entregables, estudiantes no registrados, riesgo ajustado, Excel y PDF ejecutivo institucional.</p>', unsafe_allow_html=True)
 
 if not st.session_state.client:
