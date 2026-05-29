@@ -24,7 +24,7 @@ from core.analytics import (
 from core.reports import excel_bytes, pdf_bytes, individual_pdf_bytes, DEV
 
 load_dotenv()
-st.set_page_config(page_title='AVE Monitor Académico Pro 4.0 FIX3 FIX3', page_icon='assets/app_icon.ico', layout='wide')
+st.set_page_config(page_title='AVE Monitor Académico Pro 4.0 FIX4', page_icon='assets/app_icon.ico', layout='wide')
 
 LOGO_AVE = 'assets/logo_ave.png'
 LOGO_UVG = 'assets/logo_uvg.png'
@@ -308,7 +308,7 @@ with st.sidebar:
     if Path(LOGO_UVG).exists():
         cols[1].image(LOGO_UVG, use_container_width=True)
     st.markdown('### Configuración Canvas')
-    st.caption('AVE Monitor Académico Pro 4.0 FIX3')
+    st.caption('AVE Monitor Académico Pro 4.0 FIX4')
     canvas_url = st.text_input('URL Canvas', value=os.getenv('CANVAS_URL', 'https://uvg.instructure.com'))
     token = st.text_input('Token de acceso', value=os.getenv('CANVAS_TOKEN', ''), type='password')
     generated_by = st.text_input('Nombre de quien genera el informe', value='')
@@ -334,7 +334,7 @@ with st.sidebar:
             st.error(f'No se pudo conectar: {e}')
     st.caption(f'Desarrollador: {DEV}')
 
-st.markdown('<p class="ave-title">AVE Monitor Académico Pro 4.0 FIX3</p>', unsafe_allow_html=True)
+st.markdown('<p class="ave-title">AVE Monitor Académico Pro 4.0 FIX4</p>', unsafe_allow_html=True)
 st.markdown('<p class="ave-subtitle">Análisis global por Canvas: conexión, entregables, estudiantes no registrados, riesgo ajustado, Excel y PDF ejecutivo institucional.</p>', unsafe_allow_html=True)
 
 if not st.session_state.client:
@@ -569,7 +569,16 @@ with tab_rep:
     # Se inserta la hoja resumen global dentro de la función existente usando argumentos actuales.
     xlsx = excel_bytes(summary, sub_df, pd.DataFrame(), pd.DataFrame(), modules_df, module_items_df, module_matrix)
     st.download_button('Descargar Excel global completo', xlsx, file_name=f'reporte_global_ave_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', use_container_width=True)
-    pdf = pdf_bytes(summary, 'Informe global AVE', f'{analysis.get("selected_count", 0)} cursos/secciones Canvas', generated_by, str(analysis_date))
+    curso_pdf_label = 'Informe global AVE'
+    if 'curso_general' in summary.columns and not summary.empty:
+        cursos_pdf = sorted([str(x) for x in summary['curso_general'].dropna().unique() if str(x).strip()])
+        if len(cursos_pdf) == 1:
+            curso_pdf_label = cursos_pdf[0]
+        elif len(cursos_pdf) <= 4:
+            curso_pdf_label = 'Análisis global: ' + ', '.join(cursos_pdf)
+        else:
+            curso_pdf_label = f'Análisis global de {len(cursos_pdf)} cursos generales'
+    pdf = pdf_bytes(summary, curso_pdf_label, f'{analysis.get("selected_count", 0)} cursos/secciones Canvas', generated_by, str(analysis_date))
     st.download_button('Descargar PDF ejecutivo global', pdf, file_name=f'informe_ejecutivo_global_ave_{datetime.now().strftime("%Y%m%d_%H%M")}.pdf', mime='application/pdf', use_container_width=True)
     st.markdown('#### Ficha individual PDF')
     active_options = {f"{r.get('estudiante')} | {r.get('curso_general')} | {r.get('correo','')}": r for _, r in summary.iterrows()}
