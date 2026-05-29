@@ -1,4 +1,4 @@
-# AVE Monitor Académico Pro 4.0
+# AVE Monitor Académico Pro 4.0 FIX9
 
 Aplicación Streamlit para asesores AVE/UVG conectada directamente a Canvas mediante token.
 
@@ -41,3 +41,7 @@ streamlit run app.py
 ## Seguridad
 
 El token no debe compartirse ni guardarse en documentos públicos. La app no necesita que el token esté escrito dentro del código.
+
+
+## FIX9
+Esta versión conserva el PDF ejecutivo premium de FIX4, pero restaura el cliente de conexión Canvas estable de FIX3 para evitar el error 406 posterior a FIX4.

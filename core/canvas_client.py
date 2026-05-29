@@ -1,6 +1,6 @@
 from __future__ import annotations
 import requests
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from typing import Any, Dict, List, Optional, Iterable, Tuple, Union
 import time
 
@@ -8,116 +8,56 @@ class CanvasAPIError(Exception):
     pass
 
 class CanvasClient:
-    @staticmethod
-    def _normalize_base_url(base_url: str) -> str:
-        """Normaliza la URL de Canvas para evitar llamadas por HTTP/puerto 80.
-
-        Canvas institucional debe consumirse por HTTPS. Si el usuario escribe
-        `uvg.instructure.com` o `http://uvg.instructure.com`, se convierte a
-        `https://uvg.instructure.com/`. También elimina rutas API pegadas por
-        error como `/api/v1`.
-        """
-        url = (base_url or '').strip()
-        if not url:
-            url = 'https://uvg.instructure.com'
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-        if url.startswith('http://'):
-            url = 'https://' + url[len('http://'):]
-
-        parsed = urlparse(url)
-        host = parsed.netloc or parsed.path.split('/')[0]
-        if not host:
-            host = 'uvg.instructure.com'
-        return f'https://{host.strip().rstrip("/")}/'
-
     def __init__(self, base_url: str, token: str, timeout: int = 120, max_retries: int = 3):
-        self.base_url = self._normalize_base_url(base_url)
+        self.base_url = base_url.rstrip('/') + '/'
         # Canvas puede tardar bastante cuando se consultan entregas masivas.
         # Usamos timeout separado: conexión corta y lectura amplia.
         self.timeout = (10, timeout)
         self.max_retries = max_retries
-        self.token = (token or '').strip()
         self.session = requests.Session()
-        # Encabezados mínimos y compatibles con Canvas. No enviamos Content-Type en GET,
-        # porque algunas instalaciones/proxies rechazan la negociación y devuelven 406.
         self.session.headers.update({
-            'Authorization': f'Bearer {self.token}',
-            'Accept': 'application/json',
-            'User-Agent': 'AVE-Monitor-Academico/4.0 (+Canvas API)'
+            'Authorization': f'Bearer {token.strip()}',
+            'Accept': 'application/json'
         })
 
     def _url(self, endpoint: str) -> str:
         endpoint = endpoint.lstrip('/')
-        # Algunas instancias de Canvas responden mejor cuando la ruta API solicita
-        # explícitamente formato JSON con .json. Conservamos parámetros si existieran.
-        if '?' in endpoint:
-            path, query = endpoint.split('?', 1)
-            suffix = '?' + query
-        else:
-            path, suffix = endpoint, ''
-        if not path.endswith('.json'):
-            path = path.rstrip('/') + '.json'
-        if path.startswith('api/v1/'):
-            return urljoin(self.base_url, path + suffix)
-        return urljoin(self.base_url, 'api/v1/' + path + suffix)
+        if endpoint.startswith('api/v1/'):
+            return urljoin(self.base_url, endpoint)
+        return urljoin(self.base_url, 'api/v1/' + endpoint)
 
     def get(self, endpoint: str, params: Optional[Dict[str, Any]] = None, paginate: bool = True) -> Any:
         url = self._url(endpoint)
         params = dict(params or {})
-        if paginate:
-            params.setdefault('per_page', 100)
+        params.setdefault('per_page', 100)
         if not paginate:
             r = self._request_with_retry(url, params=params)
-            # Fallback: algunas configuraciones aceptan mejor el token como parámetro
-            # de consulta que por encabezado Authorization. Se usa solo si hay 406.
-            if r.status_code == 406 and self.token:
-                retry_params = dict(params or {})
-                retry_params['access_token'] = self.token
-                r = self._request_with_retry(url, params=retry_params)
             return self._handle(r)
         results: List[Any] = []
         first = True
         while url:
-            request_params = params if first else None
-            r = self._request_with_retry(url, params=request_params)
-            if r.status_code == 406 and self.token:
-                retry_params = dict(request_params or {})
-                retry_params['access_token'] = self.token
-                r = self._request_with_retry(url, params=retry_params)
+            r = self._request_with_retry(url, params=params if first else None)
             data = self._handle(r)
             if isinstance(data, list):
                 results.extend(data)
             else:
                 return data
-            url = self._force_https_url(r.links.get('next', {}).get('url')) if r.links.get('next', {}).get('url') else None
+            url = r.links.get('next', {}).get('url')
             first = False
         return results
 
 
-    def _force_https_url(self, url: str) -> str:
-        """Asegura que cualquier URL usada por la app consulte Canvas por HTTPS.
-
-        Algunos enlaces de paginación o valores escritos por el usuario pueden venir
-        como http://...; si se usan así, Canvas responde 406 por puerto 80.
-        """
-        safe_url = (url or '').strip()
-        if safe_url.startswith('http://'):
-            safe_url = 'https://' + safe_url[len('http://'):]
-        return safe_url
-
     def _request_with_retry(self, url: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
-        """Ejecuta GET con reintentos y fuerza HTTPS en todas las llamadas."""
-        url = self._force_https_url(url)
+        """Ejecuta GET con reintentos para evitar fallos temporales de Canvas.
+
+        Canvas puede responder lento en cursos grandes, especialmente al extraer
+        entregas. Un timeout aislado no debe romper todo el análisis si el
+        siguiente intento responde correctamente.
+        """
         last_error = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                r = self.session.get(url, params=params, timeout=self.timeout, allow_redirects=True)
-                # Si algún redirect del servidor intentó llevar la llamada a HTTP, se informa claro.
-                final_url = self._force_https_url(getattr(r, 'url', url))
-                if final_url != getattr(r, 'url', url):
-                    r = self.session.get(final_url, params=None, timeout=self.timeout, allow_redirects=True)
-                return r
+                return self.session.get(url, params=params, timeout=self.timeout)
             except requests.exceptions.ReadTimeout as exc:
                 last_error = exc
                 time.sleep(min(2 * attempt, 6))
@@ -172,22 +112,13 @@ class CanvasClient:
                 detail = response.json()
             except Exception:
                 detail = response.text
-            
-            if response.status_code == 406:
-                raise CanvasAPIError(
-                    'Canvas respondió 406 Not Acceptable. La solicitud llegó a una ruta no aceptada por Canvas. '
-                    f'URL consultada: {str(getattr(response, "url", "no disponible")).split("access_token=")[0]}. '
-                    'Se intentó solicitar JSON explícito y usar autenticación compatible. Verifique que el token no incluya la palabra Bearer, que no tenga espacios al inicio/final y que sea un token personal activo de Canvas.'
-                )
             raise CanvasAPIError(f'Canvas respondió {response.status_code}: {detail}')
         if not response.text:
             return None
         return response.json()
 
     def whoami(self) -> Dict[str, Any]:
-        # Canvas responde de forma más consistente con el endpoint profile para validar tokens.
-        # /api/v1/users/self puede devolver HTML/406 en algunas instalaciones.
-        return self.get('users/self/profile', paginate=False)
+        return self.get('users/self', paginate=False)
 
     def courses(self) -> List[Dict[str, Any]]:
         return self.get('courses', params={'enrollment_state': 'active', 'include[]': ['term']})
