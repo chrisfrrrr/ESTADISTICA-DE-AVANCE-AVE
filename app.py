@@ -24,7 +24,7 @@ from core.analytics import (
 from core.reports import excel_bytes, pdf_bytes, individual_pdf_bytes, DEV
 
 load_dotenv()
-st.set_page_config(page_title='AVE Monitor Académico Pro 4.0', page_icon='assets/app_icon.ico', layout='wide')
+st.set_page_config(page_title='AVE Monitor Académico Pro 4.0 FIX2', page_icon='assets/app_icon.ico', layout='wide')
 
 LOGO_AVE = 'assets/logo_ave.png'
 LOGO_UVG = 'assets/logo_uvg.png'
@@ -219,11 +219,37 @@ def process_one_course(client: CanvasClient, course: dict, analysis_dt: datetime
     summary = append_non_active_to_summary(summary, diag_df, analysis_dt)
     summary = adjust_completion_risk(summary, completion_threshold, current_threshold)
 
-    for df in [summary, sub_df, assign_df, modules_df, module_items_df, module_matrix, diag_df]:
-        if df is not None and not df.empty:
-            df.insert(0, 'curso_general', course_group)
-            df.insert(1, 'curso_canvas', course_name)
-            df.insert(2, 'course_id', course_id)
+    # Agregar metadatos del curso sin duplicar columnas.
+    # Algunas tablas, especialmente diagnostic y summary ampliado con estudiantes no activos,
+    # ya pueden traer curso_general/curso_canvas/course_id. Usar insert() directamente
+    # provoca el error: "cannot insert curso_general, already exists".
+    def add_course_meta(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return df
+
+        meta = {
+            'curso_general': course_group,
+            'curso_canvas': course_name,
+            'course_id': course_id,
+        }
+
+        for col, value in meta.items():
+            if col not in df.columns:
+                df[col] = value
+            else:
+                df[col] = df[col].replace('', pd.NA).fillna(value)
+
+        first_cols = ['curso_general', 'curso_canvas', 'course_id']
+        other_cols = [c for c in df.columns if c not in first_cols]
+        return df[first_cols + other_cols]
+
+    summary = add_course_meta(summary)
+    sub_df = add_course_meta(sub_df)
+    assign_df = add_course_meta(assign_df)
+    modules_df = add_course_meta(modules_df)
+    module_items_df = add_course_meta(module_items_df)
+    module_matrix = add_course_meta(module_matrix)
+    diag_df = add_course_meta(diag_df)
 
     return {
         'course_id': course_id,
