@@ -40,8 +40,9 @@ class CanvasClient:
         self.session = requests.Session()
         self.session.headers.update({
             'Authorization': f'Bearer {token.strip()}',
-            'Accept': 'application/json',
-            'User-Agent': 'AVE-Monitor-Academico/4.0'
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 AVE-Monitor-Academico/4.0'
         })
 
     def _url(self, endpoint: str) -> str:
@@ -161,7 +162,9 @@ class CanvasClient:
         return response.json()
 
     def whoami(self) -> Dict[str, Any]:
-        return self.get('users/self', paginate=False)
+        # Canvas responde de forma más consistente con el endpoint profile para validar tokens.
+        # /api/v1/users/self puede devolver HTML/406 en algunas instalaciones.
+        return self.get('users/self/profile', paginate=False)
 
     def courses(self) -> List[Dict[str, Any]]:
         return self.get('courses', params={'enrollment_state': 'active', 'include[]': ['term']})
