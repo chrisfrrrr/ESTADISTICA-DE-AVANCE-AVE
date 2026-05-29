@@ -37,31 +37,54 @@ class CanvasClient:
         # Usamos timeout separado: conexión corta y lectura amplia.
         self.timeout = (10, timeout)
         self.max_retries = max_retries
+        self.token = (token or '').strip()
         self.session = requests.Session()
+        # Encabezados mínimos y compatibles con Canvas. No enviamos Content-Type en GET,
+        # porque algunas instalaciones/proxies rechazan la negociación y devuelven 406.
         self.session.headers.update({
-            'Authorization': f'Bearer {token.strip()}',
-            'Accept': 'application/json, text/plain, */*',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 AVE-Monitor-Academico/4.0'
+            'Authorization': f'Bearer {self.token}',
+            'Accept': 'application/json',
+            'User-Agent': 'AVE-Monitor-Academico/4.0 (+Canvas API)'
         })
 
     def _url(self, endpoint: str) -> str:
         endpoint = endpoint.lstrip('/')
-        if endpoint.startswith('api/v1/'):
-            return urljoin(self.base_url, endpoint)
-        return urljoin(self.base_url, 'api/v1/' + endpoint)
+        # Algunas instancias de Canvas responden mejor cuando la ruta API solicita
+        # explícitamente formato JSON con .json. Conservamos parámetros si existieran.
+        if '?' in endpoint:
+            path, query = endpoint.split('?', 1)
+            suffix = '?' + query
+        else:
+            path, suffix = endpoint, ''
+        if not path.endswith('.json'):
+            path = path.rstrip('/') + '.json'
+        if path.startswith('api/v1/'):
+            return urljoin(self.base_url, path + suffix)
+        return urljoin(self.base_url, 'api/v1/' + path + suffix)
 
     def get(self, endpoint: str, params: Optional[Dict[str, Any]] = None, paginate: bool = True) -> Any:
         url = self._url(endpoint)
         params = dict(params or {})
-        params.setdefault('per_page', 100)
+        if paginate:
+            params.setdefault('per_page', 100)
         if not paginate:
             r = self._request_with_retry(url, params=params)
+            # Fallback: algunas configuraciones aceptan mejor el token como parámetro
+            # de consulta que por encabezado Authorization. Se usa solo si hay 406.
+            if r.status_code == 406 and self.token:
+                retry_params = dict(params or {})
+                retry_params['access_token'] = self.token
+                r = self._request_with_retry(url, params=retry_params)
             return self._handle(r)
         results: List[Any] = []
         first = True
         while url:
-            r = self._request_with_retry(url, params=params if first else None)
+            request_params = params if first else None
+            r = self._request_with_retry(url, params=request_params)
+            if r.status_code == 406 and self.token:
+                retry_params = dict(request_params or {})
+                retry_params['access_token'] = self.token
+                r = self._request_with_retry(url, params=retry_params)
             data = self._handle(r)
             if isinstance(data, list):
                 results.extend(data)
@@ -153,8 +176,8 @@ class CanvasClient:
             if response.status_code == 406:
                 raise CanvasAPIError(
                     'Canvas respondió 406 Not Acceptable. La solicitud llegó a una ruta no aceptada por Canvas. '
-                    f'URL consultada: {getattr(response, "url", "no disponible")}. '
-                    'Verifique que la URL base sea https://uvg.instructure.com y que el token sea un token de acceso personal válido de Canvas.'
+                    f'URL consultada: {str(getattr(response, "url", "no disponible")).split("access_token=")[0]}. '
+                    'Se intentó solicitar JSON explícito y usar autenticación compatible. Verifique que el token no incluya la palabra Bearer, que no tenga espacios al inicio/final y que sea un token personal activo de Canvas.'
                 )
             raise CanvasAPIError(f'Canvas respondió {response.status_code}: {detail}')
         if not response.text:
